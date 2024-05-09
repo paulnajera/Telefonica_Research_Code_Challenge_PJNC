@@ -2,6 +2,7 @@ from collections import OrderedDict
 from typing import List, Tuple
 
 import numpy as np
+from numpy import random
 import torch
 from torch import randperm
 import torchvision
@@ -38,6 +39,11 @@ classes = ['5_o_Clock_Shadow', 'Arched_Eyebrows', 'Attractive', 'Bags_Under_Eyes
 
 
 def mobilenetv2_model():
+    """
+    Function to call the pre-trained model mobilenet_v2
+    (weights='IMAGENET1K_V1') ==  (pretrained = True),
+    :return: model with feature extractor layers frozen and head modified to use the attributes (0-40)
+    """
     num_classes = NUM_CLASSES
     model = models.mobilenet_v2(weights='IMAGENET1K_V1')
     # Freeze feature extractor layers
@@ -46,10 +52,9 @@ def mobilenetv2_model():
             param.requires_grad = True
         else:
             param.requires_grad = False
-
     # Modify classifier head
     model.classifier[1] = torch.nn.Linear(model.classifier[1].in_features, num_classes)
-    #
+    # or second way; possible option, add extra sigmoid layer if we want to have values btw 0-1, that would be in binary classification
     # model.classifier = nn.Sequential(
     #     nn.Dropout(0.2),
     #     nn.Linear(1280, num_classes)  # Adjust output units to match the number of classes
@@ -58,6 +63,16 @@ def mobilenetv2_model():
 
 
 def load_datasets():
+    """
+    Function to download Celeba dataset, transform the data to a specific data,
+    split in test, validation and test the dataset and in case 3, use a Data Loader right here
+    Option 1.1: Download, split manually, 90% training, 10% test. Subsequently, split training data to have
+    validation data (90% and 10%). All splits are random.
+    Option 1.2: Download, split manually, 90% training, 10% test. All splits are random.
+    Option 2: Download and split manually dataset. The dataset Celeba has an argument to select in wthat kind of
+    data we want to split
+    :return: training, test and validation
+    """
     transform = transforms.Compose([
         transforms.Resize((224, 224)),  # Resize images to 224x224
         transforms.ToTensor(),  # Convert images to PyTorch tensors
@@ -65,9 +80,9 @@ def load_datasets():
         ])
     # Download and load CelebA dataset
 
-    # # # Option 1
+    # # # Option 1.1
     # celeba_dataset = CelebA(root='./celeba_data', split='all', target_type='attr', transform=transform, download=True)
-    # if "" in celeba_dataset.attr_names: celeba_dataset.attr_names.remove("")
+    # if "" in celeba_dataset.attr_names: celeba_dataset.attr_names.remove("") #this help to just have a tensor of 40 attibutes,
     #
     # # Split CelebA dataset into training and testing sets
     # train_val_size = int(0.8 * len(celeba_dataset))
@@ -101,37 +116,28 @@ def load_datasets():
     if "" in val_set.attr_names: val_set.attr_names.remove("")
     return train_set, test_set, val_set
 
-    # # Option 3
-    # trainset = CelebA('./celeba_data', split='train', download=True, transform=transform)
-    # testset = CelebA('./celeba_data', split='test', download=True, transform=transform)
-    # if "" in trainset.attr_names: trainset.attr_names.remove("")
-    # if "" in testset.attr_names: testset.attr_names.remove("")
-    #
-    # # Split training set into `num_clients` partitions to simulate different local datasets, se usa IDD
-    # partition_size = len(trainset) // NUM_CLIENTS
-    # lengths = [partition_size] * NUM_CLIENTS # [num_of_elements_per_client, num_of_elements_per_client...]
-    # datasets = random_split(trainset, lengths, torch.Generator().manual_seed(42))
-    #
-    # # Split each partition into train/val and create DataLoader
-    # trainloaders = []
-    # valloaders = []
-    # for ds in datasets:
-    #     len_val = len(ds) // 10  # 10 % validation set
-    #     len_train = len(ds) - len_val
-    #     lengths_train_val = [len_train, len_val]
-    #     ds_train, ds_val = random_split(ds, lengths_train_val, torch.Generator().manual_seed(42))
-    #     trainloaders.append(DataLoader(ds_train, batch_size=BATCH_SIZE, shuffle=True))
-    #     valloaders.append(DataLoader(ds_val, batch_size=BATCH_SIZE))
-    # testloader = DataLoader(testset, batch_size=BATCH_SIZE)
-    #
-    # return trainloaders, valloaders, testloader
 
-
-def get_dataloader(dataset, batch_size, shuffle=True):
-    return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)
+def get_dataloader(dataset, shuffle=True):
+    """
+    Function to get DataLoaders from datasets with size batch, dataset does not need to be split between clients
+    :param dataset: dataset from which to get the data loader)
+    :param batch_size: zise of batch
+    :param shuffle:
+    :return: Subset shuffle of size batch
+    """
+    return DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=shuffle)
 
 
 def iid_data_split_w_data_loaders(train_set, test_set, val_set):
+    """
+    Function to split the data between clients in an equal and random way, drop if necessary when data // client is not 0
+    And then create subsets with size batch.
+    Two options, one when the load dataset use option 1.2, no need of modifications, it is done automatically
+    :param train_set:
+    :param test_set:
+    :param val_set:
+    :return: subsets trainloaders, testloader, valloaders
+    """
     if val_set == None: #Option 1.2
         # Split training set into 'num_clients' partitions to simulate different local datasets
         # Determine the number of samples per client
@@ -196,6 +202,13 @@ def iid_data_split_w_data_loaders(train_set, test_set, val_set):
 
 
 def iid_data_split(train_set, test_set, val_set):
+    """
+        Function to split the data between clients in an equal and random way, drop if necessary when data // client is not 0
+    :param train_set:
+    :param test_set:
+    :param val_set:
+    :return: datasets train_set_split, test_set, val_set_split
+    """
     if val_set == None: #Option 1.2
         # Split training set into 'num_clients' partitions to simulate different local datasets
         # Determine the number of samples per client
@@ -245,14 +258,76 @@ def iid_data_split(train_set, test_set, val_set):
     return train_set_split, test_set, val_set_split
 
 
-# def non_iid_data_split(train_set, test_set, val_set):
-#     num_samples_per_client = len(dataset) // NUM_CLIENTS
-#     indices = torch.randperm(len(dataset)).tolist()
-#     client_data = [torch.utils.data.Subset(dataset, indices[i*num_samples_per_client:(i+1)*num_samples_per_client]) for i in range(num_clients)]
-#     return client_data
+#function needs work to be done, I implemented at the beginning before the model, therefore it does not have relevance
+def non_iid_data_split(data_train, num_clients, num_attributes=None, attributes=None):
+    """
+    To split dataset or number of classes/tributes in a random way betwee the clients
+    :param data_train:
+    :param num_clients:
+    :param num_attributes:
+    :param attributes:
+    :return:
+    """
+
+    # Attributes
+    # 5 landmark locations, 40 binary attributes annotations per image.
+
+    # obtain which attributes to use in a random way and get the names of those attributes
+    if num_attributes is None:
+        # Obtain position/index of attributes
+        attributes_index = []
+        [attributes_index.append(data_train.dataset.attr_names.index(attributes[i])) for i in range(len(attributes))]
+        attributes_index = sorted(attributes_index)
+        num_attributes = len(attributes_index)
+    else:
+        # Obtain which attributes to use
+        attributes_index = sorted(random.randint(0, 39, size=num_attributes))
+        attributes_name = []
+        for i in range(num_attributes):
+            attributes_name.append(data_train.dataset.attr_names[attributes_index[i]])
+
+    # Create group of clients
+    clients_groups = (np.array_split(range(num_clients), 2**num_attributes))
+    # dict for saving the values of index for every class or attributes
+    dict_classes_index = {}
+    # dic of list of diff ways of combinations
+    dict_values_classes = {}
+    list_of_combinations = list(itertools.product([0, 1], repeat=num_attributes))
+    for i in range(2**num_attributes):
+        dict_classes_index[i] = []
+        dict_values_classes[i] = list(list_of_combinations[i])
+
+    # go through every index's tensor and check if its values fits in any of those classes previously decided
+    for i in data_train.indices:
+        attributes_values = list(np.array(data_train.dataset.attr.data[i])[attributes_index])
+        for j in range(2**num_attributes):
+            if attributes_values == dict_values_classes[j]:
+                dict_classes_index[j].append(i)
+                break
+
+    dict_clients = {}
+    for u, group in enumerate(clients_groups):
+        # Determine the number of samples per client
+        samples_per_client = len(dict_classes_index[u]) // len(clients_groups[u])
+        # Split the data classes into equal portions for each group of client
+        client_data_indices = [dict_classes_index[u][i:(i + samples_per_client)] for i in
+                               range(0, samples_per_client * len(group), samples_per_client)]
+        for a, b in enumerate(group):
+            dict_clients[b] = Subset(data_train, client_data_indices[a])
+
+    return dict_clients
+
+    # Note: if we increase attributes, the data turns to be more specific, and the number of matches of those attributes
+    # could not be enough to split it between clients, or they will receive the same info, i.e. 4 values who match the selected
+    # attributes, and we have 10 clients. On the other hand, less selected att. 20000 values and 10 clients
 
 
 def obtain_classes(batch):
+    """
+    Function to obtain the name of the attributes who have a value of 1
+    :param batch:
+    :return:
+    """
     positions_batch = []
     for list_num, i in enumerate(batch[1]):
         positions_unit = []
@@ -264,17 +339,20 @@ def obtain_classes(batch):
 
 
 def train_model(model, train_loader, epochs=10):
+    """
+    Function to train our model
+    :param model: mobilenetV2
+    :param train_loader: dataset of info to be use to train our model
+    :param epochs:
+    :return:
+    """
     # optimizer = optim.SGD(model.parameters(), lr=0.01)
-    # verbose = False
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
-    # criterion = nn.CrossEntropyLoss()
-    criterion = nn.BCEWithLogitsLoss()
-
+    optimizer = optim.Adam(model.parameters(), lr=0.001)
+    criterion = nn.CrossEntropyLoss()
+    # criterion = nn.BCEWithLogitsLoss()
+    # criterion = nn.BCELoss()
     model.to(DEVICE)
     model.train()
-
-    # batch = next(iter(train_loader))
-    # images, labels = batch[0], batch[1]
 
     for epoch in range(epochs):
         running_loss = 0.0
@@ -286,6 +364,7 @@ def train_model(model, train_loader, epochs=10):
             images, labels = batch[0].to(DEVICE), batch[1].to(DEVICE)
             optimizer.zero_grad()
             outputs = model(images)
+            # I need one loss that gives me 1 or 0 or btw 1 and 0 in the same tensor form that label or post processing, numbers close to 1 or 0 turn to be 1 or 0
             loss = criterion(outputs.to(torch.float), labels.to(torch.float))
             loss.backward()
             optimizer.step()
@@ -298,9 +377,18 @@ def train_model(model, train_loader, epochs=10):
 
 
 def test_model(model, test_loader):
+    """
+    Fucntion use to test out model, needs to be worked, multilabel criterion gives me thigns to read and how
+    to evaluate in a correct matter
+    :param model:
+    :param test_loader:
+    :return:
+    """
+
     """Evaluate the network on the entire test set."""
-    # criterion = torch.nn.CrossEntropyLoss()
-    criterion = nn.BCEWithLogitsLoss()
+    criterion = nn.CrossEntropyLoss()
+    # criterion = nn.BCEWithLogitsLoss()
+    # criterion = nn.BCELoss()
     correct, total, loss = 0, 0, 0.0
     model.eval()
     with torch.no_grad():
@@ -309,14 +397,15 @@ def test_model(model, test_loader):
             outputs = model(images)
             loss += criterion(outputs.to(torch.float), labels.to(torch.float)).item()
             _, predicted = torch.max(outputs.data, 1)
-            total += labels.size(0)
-            correct += (predicted == labels).sum().item()
-    loss /= len(test_loader.dataset)
-    accuracy = correct / total
-    return loss, accuracy
+    #         total += labels.size(0)
+    #         correct += (predicted == labels).sum().item()
+    # loss /= len(test_loader.dataset)
+    # accuracy = correct / total
+    # return loss, accuracy
 
 
 #Implementing Flower
+#Functions and parameters to train our model in the clients side
 def set_parameters(model, parameters: List[np.ndarray]):
     params_dict = zip(model.state_dict().keys(), parameters)
     state_dict = OrderedDict({k: torch.Tensor(v) for k, v in params_dict})
@@ -345,7 +434,11 @@ class FlowerClient(fl.client.NumPyClient):
         return float(loss), len(self.val_loader), {"accuracy": float(accuracy)}
 
 def client_fn(cid: str) -> FlowerClient:
-    """Create a Flower client representing a single organization."""
+    """
+    Funtion to create a Flower client representing a single organization
+    :param cid:
+    :return:
+    """
     # Load model
     model = mobilenetv2_model().to(DEVICE)
 
@@ -357,65 +450,55 @@ def client_fn(cid: str) -> FlowerClient:
     # Create a  single Flower client representing a single organization
     return FlowerClient(model, train_loader, val_loader).to_client()
 
-#Starting the training
-
-""""""
-
 
 # Start of process
-# #Option3
-# trainloaders, valloaders, testloader = load_datasets()
-
-#Option 1 and 2
+ #Load data
 train_set, test_set, val_set = load_datasets() #just loaded, not random shuffle
 
 #Block of data not splitted btw clients and extracted by DataLoader
-# train_loader = get_dataloader(train_set, batch_size=32, shuffle=True)
-# test_loader = get_dataloader(train_set, batch_size=32, shuffle=True)
-# val_loader = get_dataloader(val_set, batch_size=32, shuffle=False)
+# train_loader = get_dataloader(train_set, shuffle=True)
+# test_loader = get_dataloader(train_set, shuffle=True)
+# val_loader = get_dataloader(val_set, shuffle=False)
 
 # IID data split
 # train_set_split_idd, test_set_split_idd, val_set_split_idd = iid_data_split(train_set, test_set, val_set)  #data split rando btw clients
 train_loaders, test_loaders, val_loaders = iid_data_split_w_data_loaders(train_set, test_set, val_set) #data split rando btw clients equally and extracted by DataLoader
 
-# batch = next(iter(train_loaders[0]))
-# images, labels = batch[0], batch[1]
-
 # Define model
 model = mobilenetv2_model().to(DEVICE)
 
-# Train the classifier head from scratch
 
-train_loader = train_loaders[0]
-val_loader = val_loaders[0]
+#Train the model in a local way
+
 # train_model(model, train_loader)
 # test_model(model, test_loader)
-# Train test local
-for epoch in range(2): #5
-    train_model(model, train_loader, 1)
-    loss, accuracy = test_model(model, val_loader)
-    print(f"Epoch {epoch+1}: validation loss {loss}, accuracy {accuracy}")
-#
-# loss, accuracy = test_model(model, test_loaders)
-# print(f"Final test set performance:\n\tloss {loss}\n\taccuracy {accuracy}")
-#
 
+#with just a set of clients
+train_loader = train_loaders[0]
+val_loader = val_loaders[0]
+for epoch in range(5):
+    train_model(model, train_loader, 1)
+    # loss, accuracy = test_model(model, val_loader)
+    # print(f"Epoch {epoch+1}: validation loss {loss}, accuracy {accuracy}")
+# loss, accuracy = test_model(model, test_loaders)
+# print(f"Final test set performance:\n\t loss {loss}\n\t accuracy {accuracy}")
+#
+#Train with the whole set of clients and data
 # for epoch in range(5):
 #     for u in range(NUM_CLIENTS):
 #         train_model(model, train_loaders[u], 1)
 #         loss, accuracy = test_model(model, val_loaders[u])
 #         print(f"Epoch {epoch+1}: validation loss {loss}, accuracy {accuracy}")
-#
+
 # loss, accuracy = test_model(model, test_loaders)
-# print(f"Final test set performance:\n\tloss {loss}\n\taccuracy {accuracy}")
+# print(f"Final test set performance:\n\t loss {loss}\n\t accuracy {accuracy}")
 
 
 # torch.save(model.state_dict(), './celeba_data')
 # torch.save(model, './celeba_data')
 
-test = 5
 
-# Create FedAvg strategy
+# FedAvg strategy
 strategy = fl.server.strategy.FedAvg(
     fraction_fit=1.0,  # Sample 100% of available clients for training
     fraction_evaluate=0.5,  # Sample 50% of available clients for evaluation
@@ -424,27 +507,22 @@ strategy = fl.server.strategy.FedAvg(
     min_available_clients=10,  # Wait until all 10 clients are available
 )
 
-# Specify the resources each of your clients need. By default, each
+# Specification of resources that each client need. By default, each
 # client will be allocated 1x CPU and 0x GPUs
 client_resources = {"num_cpus": 1, "num_gpus": 0.0}
 if DEVICE == "cuda":
     # here we are assigning an entire GPU for each client.
     client_resources = {"num_cpus": 1, "num_gpus": 1.0}
-    # Refer to our documentation for more details about Flower Simulations
-    # and how to setup these `client_resources`.
 
 # Start simulation
 fl.simulation.start_simulation(
     client_fn=client_fn,
     num_clients=NUM_CLIENTS,
-    config=fl.server.ServerConfig(num_rounds=5),
+    config=fl.server.ServerConfig(num_rounds=10),  #ten rouds
     strategy=strategy,
     client_resources=client_resources,
 )
 
-
-
-""""""
 
 
 

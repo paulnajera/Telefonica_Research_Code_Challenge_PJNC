@@ -462,7 +462,7 @@ train_set, test_set, val_set = load_datasets() #just loaded, not random shuffle
 
 # IID data split
 # train_set_split_idd, test_set_split_idd, val_set_split_idd = iid_data_split(train_set, test_set, val_set)  #data split rando btw clients
-train_loaders, test_loaders, val_loaders = iid_data_split_w_data_loaders(train_set, test_set, val_set) #data split rando btw clients equally and extracted by DataLoader
+train_loaders, test_loaders, val_loaders = iid_data_split_w_data_loaders(train_set, test_set, val_set) #data split in a randon, btw clients equally and extracted by DataLoader
 
 # Define model
 model = mobilenetv2_model().to(DEVICE)
